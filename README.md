@@ -79,18 +79,6 @@ its line to `VSAC_PROFILES` in `build_bundle.rb`, or pass `--profile`. A wrong
 profile still builds, but its value sets are wrong, so results are silently
 wrong.
 
-### Empty value sets
-
-cqm-parsers fails a measure when VSAC expands one of its value sets to
-nothing. Some packages still declare a retired value set they no longer use:
-CMS157v14 (2026) declares the legacy ONC Administrative Sex
-(`2.16.840.1.113762.1.4.1`) beside its replacement, Federal Administrative Sex,
-and the 2025-05-08 profile expands it to nothing. Value sets listed in
-`ALLOWED_EMPTY_VALUE_SETS` in `build_bundle.rb`, or passed with
-`--allow-empty-value-set OID`, are kept empty instead. The build still fails the
-measure if its logic (any `ValueSetRef` in its ELM) uses an empty value set, so
-an empty value set can never silently drop data.
-
 ### Directory names
 
 OpenEMR loads a measure from `json_measures/{option_id}/{option_id}.json`, and
