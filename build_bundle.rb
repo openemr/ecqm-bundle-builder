@@ -25,6 +25,16 @@ require 'optparse'
 
 Mongoid.include_type_for_serialization = true
 
+# The pinned cqm-parsers VSAC loader reads APP_CONFIG when it first loads
+# the API. Supply the endpoint configuration in this standalone builder.
+APP_CONFIG = {
+  'vsac' => {
+    'auth_url' => 'https://vsac.nlm.nih.gov/vsac/ws',
+    'content_url' => 'https://vsac.nlm.nih.gov/vsac/svs',
+    'utility_url' => 'https://vsac.nlm.nih.gov/vsac'
+  }.freeze
+}.freeze
+
 # The eCQM Annual Update published each May is for the NEXT performance
 # period, so a period's value sets come from the previous year's profile.
 VSAC_PROFILES = {
