@@ -2,16 +2,39 @@
 
 OpenEMR calculates eCQMs from a **measure bundle** for each performance period:
 for every measure, the measure JSON (including its CQL, compiled as ELM) and its
-value sets expanded from VSAC. This tool builds those bundles from CMS's eCQM
-packages with [cqm-parsers](https://github.com/sjpadgett/cqm-parsers), in a
+value sets expanded from VSAC. This repository holds both the tool that builds
+the bundles and the bundles themselves, one `{year}_reporting_period` directory
+per performance period.
+
+The tool runs [cqm-parsers](https://github.com/sjpadgett/cqm-parsers) in a
 Docker container, so no Ruby setup is needed.
 
-The bundles are published in the
-[`openemr/oe-cqm-parsers`](https://github.com/openemr/oe-cqm-parsers) Composer
-package, which OpenEMR reads from
-`vendor/openemr/oe-cqm-parsers/{year}_reporting_period/json_measures`. This
-directory holds only the tool; measure packages and generated bundles are never
-committed here.
+## How OpenEMR gets the bundles
+
+OpenEMR's `composer.json` defines the Composer package `openemr/oe-cqm-parsers`
+inline, pinned to one commit of a bundle repository. Composer installs it in
+`vendor/openemr/oe-cqm-parsers`, and OpenEMR reads
+`vendor/openemr/oe-cqm-parsers/{year}_reporting_period/json_measures`, with the
+year taken from the global **Eligible Clinician eCQM Performance Period**.
+Changes here reach OpenEMR only when OpenEMR pins a newer commit.
+
+## Adding a new performance period
+
+Once a year, when CMS publishes the eCQM Annual Update:
+
+1. **Build** the bundle in this repository (see below), check the summary says
+   no measure failed, then commit and push.
+2. **Pin it in OpenEMR** in one pull request:
+   - In `composer.json`, in the inline `openemr/oe-cqm-parsers` package, set
+     the repository URL, both `reference` values and the zipball URL to the new
+     commit, and raise `version`. Then run
+     `composer update openemr/oe-cqm-parsers`.
+   - Add the generated `ecqm_{year}_reporting.sql` to `sql/database.sql`, and
+     to the current `sql/*-upgrade.sql` with a `v_database` bump.
+3. **Verify** it (see Verify it).
+4. Users choose the new year in Administration > Globals > CDR >
+   **Eligible Clinician eCQM Performance Period**. Changing its default is a
+   separate decision.
 
 ## What you need
 
@@ -29,14 +52,10 @@ committed here.
 1. Set up once:
 
    ```bash
-   cd contrib/ecqm-bundle-builder
    cp .env.sample .env    # then fill in VSAC_API_KEY
    ```
 
-   To update the published bundles directly, set `BUNDLE_HOST_DIR` in `.env` to
-   a checkout of `openemr/oe-cqm-parsers`. Otherwise bundles go to `./bundles`.
-
-2. Put the packages in `{BUNDLE_HOST_DIR}/{year}_reporting_period/cms_measures/`.
+2. Put the packages in `{year}_reporting_period/cms_measures/`.
 
 3. Build:
 
@@ -57,10 +76,12 @@ committed here.
    docker compose run --rm builder ruby generate_ecqm_list.rb --year 2026
    ```
 
-   This writes `ecqm_2026_reporting.sql` next to the period directories,
-   guarded with `#IfNotRow` so it can go into an upgrade script as it is.
-   Use `--defaults CMS122v,CMS165v,...` to choose which measures are active by
-   default.
+   This writes `ecqm_2026_reporting.sql`, guarded with `#IfNotRow` so it can go
+   into an upgrade script as it is. Use `--defaults CMS122v,CMS165v,...` to
+   choose which measures are active by default.
+
+If you change `build_bundle.rb` or `generate_ecqm_list.rb`, run
+`docker compose build` to rebuild the image.
 
 ### Value set profile
 
@@ -103,15 +124,9 @@ period built before this rule:
 docker compose run --rm builder ruby build_bundle.rb --year 2026 --rename-existing
 ```
 
-## Ship it
-
-1. Commit the new `{year}_reporting_period` directory to `openemr/oe-cqm-parsers`
-   and tag a release.
-2. In OpenEMR, bump `openemr/oe-cqm-parsers` in `composer.json` and run
-   `composer update openemr/oe-cqm-parsers`.
-3. Add the list SQL to the current `sql/*-upgrade.sql` and to `sql/database.sql`.
-
 ## Verify it
+
+In OpenEMR, after pinning the new commit:
 
 - `vendor/bin/phpunit -c phpunit-isolated.xml tests/Tests/Isolated/Services/Qdm/MeasureCalculationMethodTest.php`
   checks every measure of every bundle.
@@ -119,7 +134,6 @@ docker compose run --rm builder ruby build_bundle.rb --year 2026 --rename-existi
   period, then run `tests/Tests/Isolated/Cqm/Parity/PhpEngineParityTest.php`.
 - End to end on a test database:
   `OPENEMR_ENABLE_CQM_TEST_PATIENTS=1 php bin/console openemr:cqm-load-test-patients --year=2026 --verify`.
-- Cypress test decks for the period, checked with `tests/Tests/ECQM/MeasureResultsTest.php`.
 
 ## Notes
 
@@ -128,5 +142,5 @@ docker compose run --rm builder ruby build_bundle.rb --year 2026 --rename-existi
 - `Gemfile.lock` pins every gem, including the cqm-parsers commit, so a measure
   rebuilt from the same package gives the same measure JSON apart from record
   ids, which are generated on each build.
-- If you change `build_bundle.rb` or `generate_ecqm_list.rb`, run
-  `docker compose build` to rebuild the image.
+- `.gitattributes` keeps LF line endings, also on Windows checkouts.
+- Never commit `.env`; it holds your VSAC API key.
