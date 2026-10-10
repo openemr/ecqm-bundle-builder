@@ -10,6 +10,6 @@ services:
     - VSAC_API_KEY
     - BUNDLE_DIR=/bundles
     volumes:
-      # The year directories (cms_measures in, json_measures out). Point
-      # BUNDLE_HOST_DIR at a checkout of openemr/oe-cqm-parsers to update it.
-    - ${BUNDLE_HOST_DIR:-./bundles}:/bundles
+      # The year directories (cms_measures in, json_measures out); by default
+      # this repository, which is where the bundles are kept.
+    - ${BUNDLE_HOST_DIR:-.}:/bundles
