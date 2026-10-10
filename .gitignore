@@ -2,3 +2,4 @@
 bundles/
 output/
 *.log
+.idea/
