@@ -25,6 +25,15 @@ require 'optparse'
 
 Mongoid.include_type_for_serialization = true
 
+# cqm-parsers reads the VSAC endpoints from this constant
+APP_CONFIG = {
+  'vsac' => {
+    'auth_url' => 'https://vsac.nlm.nih.gov/vsac/ws',
+    'content_url' => 'https://vsac.nlm.nih.gov/vsac/svs',
+    'utility_url' => 'https://vsac.nlm.nih.gov/vsac'
+  }
+}.freeze
+
 # The eCQM Annual Update published each May is for the NEXT performance
 # period, so a period's value sets come from the previous year's profile.
 VSAC_PROFILES = {
@@ -35,7 +44,18 @@ VSAC_PROFILES = {
   2022 => 'eCQM Update 2021-05-06'
 }.freeze
 
-options = { year: nil, profile: nil, bundle_dir: ENV.fetch('BUNDLE_DIR', '.'), rename_existing: false, rebuild: false }
+# Value sets a measure package may declare although the period's profile
+# expands them to nothing. cqm-parsers fails the whole measure on an empty
+# value set; these are kept empty instead, and the measure is still rejected
+# if its logic references one (see referenced_empty_value_sets).
+ALLOWED_EMPTY_VALUE_SETS = {
+  # CMS157v14 still declares it beside its replacement, Federal
+  # Administrative Sex (2.16.840.1.113762.1.4.1021.121), but never uses it
+  '2.16.840.1.113762.1.4.1' => 'ONC Administrative Sex (retired)'
+}.freeze
+
+options = { year: nil, profile: nil, bundle_dir: ENV.fetch('BUNDLE_DIR', '.'), rename_existing: false, rebuild: false,
+            allowed_empty: ALLOWED_EMPTY_VALUE_SETS.keys }
 
 parser = OptionParser.new do |opts|
   opts.banner = 'Usage: ruby build_bundle.rb --year YEAR [options]'
@@ -44,6 +64,8 @@ parser = OptionParser.new do |opts|
   opts.on('--bundle-dir DIR', 'Directory holding the {year}_reporting_period folders (default: $BUNDLE_DIR)') { |v| options[:bundle_dir] = v }
   opts.on('--rename-existing', 'Only rename already built measure directories to their cms_id; no VSAC needed') { options[:rename_existing] = true }
   opts.on('--rebuild', 'Build measures whose JSON already exists again') { options[:rebuild] = true }
+  opts.on('--allow-empty-value-set OID', 'Keep this value set empty if VSAC expands it to nothing (repeatable);',
+          'the measure still fails if its logic uses it') { |v| options[:allowed_empty] << v }
   opts.on('-h', '--help', 'Show this help') do
     puts opts
     puts "\nPerformance period => VSAC profile:"
@@ -103,6 +125,54 @@ abort("[ERROR] #{packages_dir} not found; put the CMS eCQM packages (zip) there"
 api_key = ENV.fetch('VSAC_API_KEY', '')
 abort('[ERROR] VSAC_API_KEY is not set (see .env.sample)') if api_key.empty?
 
+# cqm-parsers raises VSEmptyError for a value set with no concepts; for the
+# allowed OIDs, keep the response so the value set is built with none.
+module AllowEmptyValueSets
+  class << self
+    attr_accessor :oids
+  end
+  self.oids = []
+
+  private
+
+  def process_and_validate_vsac_response(vs_response, expected_oid)
+    super
+  rescue Util::VSAC::VSEmptyError
+    raise unless AllowEmptyValueSets.oids.include?(expected_oid)
+
+    puts "[WARN] Value set #{expected_oid} is empty in this profile; kept empty"
+    vs_response.body.force_encoding('utf-8')
+  end
+end
+AllowEmptyValueSets.oids = options[:allowed_empty].uniq
+Util::VSAC::VSACAPI.prepend(AllowEmptyValueSets)
+
+# The empty value sets of a measure that its ELM uses (a ValueSetRef to a
+# valueset definition with that OID, in any library). Those would make the
+# measure silently miss data, so such a measure fails.
+def referenced_empty_value_sets(measure)
+  empty = measure.value_sets.select { |vs| vs.concepts.empty? }.map(&:oid)
+  return [] if empty.empty?
+
+  measure.cql_libraries.flat_map do |library|
+    elm = library.elm.respond_to?(:to_h) ? library.elm.to_h : library.elm
+    defs = elm.dig('library', 'valueSets', 'def') || []
+    names = defs.select { |d| empty.include?(d['id'].to_s.delete_prefix('urn:oid:')) }.to_h { |d| [d['name'], d['id'].to_s.delete_prefix('urn:oid:')] }
+    names.empty? ? [] : value_set_refs(elm).filter_map { |name| names[name] }
+  end.uniq
+end
+
+def value_set_refs(node, found = [])
+  case node
+  when Hash
+    found << node['name'] if node['type'] == 'ValueSetRef'
+    node.each_value { |v| value_set_refs(v, found) }
+  when Array
+    node.each { |v| value_set_refs(v, found) }
+  end
+  found
+end
+
 value_set_loader = Measures::VSACValueSetLoader.new(options: { profile: profile }, vsac_api_key: api_key)
 FileUtils.mkdir_p(output_dir)
 
@@ -134,6 +204,9 @@ Dir.glob(File.join(packages_dir, '*.zip')).sort.each do |package|
   begin
     measures = Measures::CqlLoader.new(File.new(package), {}, value_set_loader).extract_measures
     measures.each do |measure|
+      used_empty = referenced_empty_value_sets(measure)
+      raise "measure logic uses empty value set(s) #{used_empty.join(', ')}" unless used_empty.empty?
+
       dir = File.join(output_dir, measure.cms_id)
       FileUtils.mkdir_p(dir)
       File.write(File.join(dir, 'value_sets.json'), measure.value_sets.to_json)
