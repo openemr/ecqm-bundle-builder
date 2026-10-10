@@ -1,1 +1,4 @@
 .env
+bundles/
+output/
+*.log

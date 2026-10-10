@@ -1,28 +1,15 @@
-version: '3.8'
-
+# Usage: docker compose run --rm builder ruby build_bundle.rb --year 2026
+# See README.md.
 services:
-  parser:
+  builder:
     build: .
-    container_name: oe-cqm-parsers
-    volumes:
-      - .:/app
-    working_dir: /app
+    env_file:
+    - path: .env
+      required: false
     environment:
-      - MONGO_URL=mongodb://mongo:27017/cqm
-      - VSAC_API_KEY=${VSAC_API_KEY}
-    depends_on:
-      - mongo
-    stdin_open: true
-    tty: true
-    command: bash
-
-  mongo:
-    image: mongo:6.0
-    container_name: mongo
-    ports:
-      - "27017:27017"
+    - VSAC_API_KEY
+    - BUNDLE_DIR=/bundles
     volumes:
-      - mongo_data:/data/db
-
-volumes:
-  mongo_data:
+      # The year directories (cms_measures in, json_measures out). Point
+      # BUNDLE_HOST_DIR at a checkout of openemr/oe-cqm-parsers to update it.
+    - ${BUNDLE_HOST_DIR:-./bundles}:/bundles
