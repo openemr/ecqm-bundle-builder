@@ -1,18 +1,14 @@
+# eCQM measure bundle builder: cqm-parsers (Ruby) turns CMS eCQM packages
+# into the measure and value set JSON OpenEMR calculates from.
 FROM ruby:3.3
 
-# Install required dependencies
-RUN apt-get update -qq && \
-    apt-get install -y build-essential git libpq-dev nodejs
+WORKDIR /builder
 
-# Create app directory
-WORKDIR /app
-
-# Install bundler and dependencies
 COPY Gemfile Gemfile.lock ./
-RUN gem install bundler && bundle install
+RUN gem install bundler -v 2.2.14 && bundle install
 
-# Copy app code
-COPY . .
+COPY build_bundle.rb generate_ecqm_list.rb ./
 
-# Default command (can override with docker exec or -it)
-CMD ["irb"]
+# Measure packages and the generated bundles live in the mounted /bundles.
+ENV BUNDLE_DIR=/bundles
+CMD ["ruby", "build_bundle.rb", "--help"]

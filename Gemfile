@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
+# Kept identical to the Gemfile that built the published measure bundles;
+# Gemfile.lock pins every gem, including the cqm-parsers commit.
 source 'https://rubygems.org'
-
-#git_source(:github) {|repo_name| "https://github.com/#{repo_name}" }
 
 gem 'debug', '~> 1.0'
 gem 'cqm-parsers', :git => 'https://github.com/sjpadgett/cqm-parsers.git', :branch => 'master'

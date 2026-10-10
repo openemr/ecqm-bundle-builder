@@ -1,1 +1,5 @@
 .env
+bundles/
+output/
+*.log
+.idea/
